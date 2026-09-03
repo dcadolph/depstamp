@@ -1,0 +1,119 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skill frontmatter is present and parseable
+        run: |
+          python3 - <<'PY'
+          import sys, re
+          path = "skills/depstamp/SKILL.md"
+          text = open(path).read()
+          if not text.startswith("---\n"):
+              sys.exit(f"{path}: missing YAML frontmatter")
+          end = text.find("\n---\n", 3)
+          if end == -1:
+              sys.exit(f"{path}: frontmatter is not terminated")
+          front = text[4:end]
+          for key in ("name:", "description:"):
+              if not re.search(rf"^{key}", front, re.M):
+                  sys.exit(f"{path}: frontmatter lacks {key}")
+          name = re.search(r"^name:\s*(\S+)", front, re.M).group(1)
+          if name != "depstamp":
+              sys.exit(f"{path}: name is {name}, expected depstamp")
+          print("frontmatter ok")
+          PY
+
+      - name: Record format examples are valid JSON with the documented fields
+        run: |
+          python3 - <<'PY'
+          import json, re, sys
+          required = {"schema", "package", "version", "ecosystem",
+                      "project", "task", "observed", "date"}
+          found = 0
+          for path in ("README.md", "skills/depstamp/SKILL.md", "docs/record-format.md", "docs/open-questions.md"):
+              for line in open(path):
+                  line = line.strip()
+                  if not line.startswith('{"schema"'):
+                      continue
+                  found += 1
+                  try:
+                      record = json.loads(line)
+                  except json.JSONDecodeError as err:
+                      sys.exit(f"{path}: example is not valid JSON: {err}")
+                  missing = required - record.keys()
+                  if missing:
+                      sys.exit(f"{path}: example lacks {sorted(missing)}")
+                  if record["schema"] != "depstamp/v0":
+                      sys.exit(f"{path}: unexpected schema {record['schema']}")
+                  if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", record["date"]):
+                      sys.exit(f"{path}: date {record['date']} is not YYYY-MM-DD")
+          if found == 0:
+              sys.exit("no record examples found to check")
+          print(f"{found} record example(s) ok")
+          PY
+
+      - name: The docs make no claim the tool cannot support
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          # The whole product rests on a bounded claim. A doc that drifts into
+          # endorsement language is a defect, so the wording is checked here
+          # rather than trusted to review.
+          banned = [
+              r"\bcertif(y|ies|ied|ication)\b",
+              r"\bendorse[sd]?\b(?! )",
+              r"\bguarantee[sd]?\b",
+              r"\bproves? that .{0,20}\bis (good|safe|reliable)\b",
+              r"\btrusted (package|dependency|library)\b",
+              r"\bseal of\b",
+          ]
+          # Checked per sentence, not per line. A disclaimer that wraps across
+          # two lines puts its negation on the line above the banned word, and
+          # a line-at-a-time check reads that as a violation.
+          negations = ("not ", "never", "no ", "nothing", "avoid", "rules out",
+                       "does not", "cannot", "without")
+          bad = []
+          for path in ("README.md", "skills/depstamp/SKILL.md", "docs/record-format.md", "docs/open-questions.md"):
+              text = open(path).read()
+              # Collapse wrapping, then split on sentence and list boundaries.
+              flat = re.sub(r"\s+", " ", text)
+              for sentence in re.split(r"(?<=[.:!?])\s+|\s+[-*]\s+|\s+\|\s+", flat):
+                  low = sentence.lower()
+                  if any(w in low for w in negations):
+                      continue
+                  for pattern in banned:
+                      if re.search(pattern, low):
+                          bad.append(f"{path}: {sentence.strip()[:120]}")
+          if bad:
+              sys.exit("overclaiming language:\n" + "\n".join(bad))
+          print("claim language ok")
+          PY
+
+      - name: Links inside the repo resolve
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          missing = []
+          for root, dirs, files in os.walk("."):
+              dirs[:] = [d for d in dirs if d not in (".git", ".github")]
+              for name in files:
+                  if not name.endswith(".md"):
+                      continue
+                  path = os.path.join(root, name)
+                  for target in re.findall(r"\]\(([^)#:]+)\)", open(path).read()):
+                      resolved = os.path.normpath(os.path.join(root, target))
+                      if not os.path.exists(resolved):
+                          missing.append(f"{path} -> {target}")
+          if missing:
+              sys.exit("broken links:\n" + "\n".join(missing))
+          print("links ok")
+          PY

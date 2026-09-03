@@ -69,6 +69,11 @@ history? If it does not, this stays a small skill and that is a fine outcome.
 If it does, the path is observation, then record, then signed attestation, then
 aggregation. Each rung has to earn the next.
 
+Known weaknesses and the reasoning behind the current design are in
+[docs/open-questions.md](docs/open-questions.md), including the one that
+matters most: version zero records what a project declares, which is weaker
+evidence than what a task actually exercised.
+
 ## Install
 
 Copy `skills/depstamp/SKILL.md` into your Claude Code skills directory, or
